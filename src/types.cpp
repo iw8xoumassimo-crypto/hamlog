@@ -1,0 +1,103 @@
+#include "types.h"
+
+QHash<QString,QVariant> Qso::toMap() const
+{
+    QHash<QString,QVariant> m;
+    m["id"]            = id;
+    m["log_id"]        = logId;
+    m["callsign"]      = callsign;
+    m["date"]          = date;
+    m["time_on"]       = timeOn;
+    m["time_off"]      = timeOff;
+    m["band"]          = band;
+    m["freq"]          = freq;
+    m["mode"]          = mode;
+    m["submode"]       = submode;
+    m["rst_sent"]      = rstSent;
+    m["rst_rcvd"]      = rstRcvd;
+    m["name"]          = name;
+    m["qth"]           = qth;
+    m["country"]       = country;
+    m["dxcc_id"]       = dxccId;
+    m["cq_zone"]       = cqZone;
+    m["itu_zone"]      = ituZone;
+    m["continent"]     = continent;
+    m["lat"]           = lat;
+    m["lon"]           = lon;
+    m["state"]         = state;
+    m["gridsquare"]    = gridsquare;
+    m["distance"]      = distance;
+    m["bearing"]       = bearing;
+    m["power"]         = power;
+    m["comment"]       = comment;
+    m["notes"]         = notes;
+    m["iota"]          = iota;
+    m["sota_ref"]      = sotaRef;
+    m["pota_ref"]      = potaRef;
+    m["contest_id"]    = contestId;
+    m["srx"]           = srx;
+    m["stx"]           = stx;
+    m["manager"]       = manager;
+    m["operator_call"] = operatorCall;
+    m["station_call"]  = stationCall;
+    m["qsl_sent"]      = qslSent;
+    m["qsl_rcvd"]      = qslRcvd;
+    m["lotw_sent"]     = lotwSent;
+    m["lotw_rcvd"]     = lotwRcvd;
+    m["eqsl_sent"]     = eqslSent;
+    m["eqsl_rcvd"]     = eqslRcvd;
+    m["clublog_sent"]  = clublogSent ? 1 : 0;
+    m["created_at"]    = createdAt;
+    return m;
+}
+
+Qso Qso::fromMap(const QHash<QString,QVariant>& m)
+{
+    Qso q;
+    q.id           = m.value("id").toInt();
+    q.logId        = m.value("log_id", 1).toInt();
+    q.callsign     = m.value("callsign").toString();
+    q.date         = m.value("date").toString();
+    q.timeOn       = m.value("time_on").toString();
+    q.timeOff      = m.value("time_off").toString();
+    q.band         = m.value("band").toString();
+    q.freq         = m.value("freq").toDouble();
+    q.mode         = m.value("mode").toString();
+    q.submode      = m.value("submode").toString();
+    q.rstSent      = m.value("rst_sent","59").toString();
+    q.rstRcvd      = m.value("rst_rcvd","59").toString();
+    q.name         = m.value("name").toString();
+    q.qth          = m.value("qth").toString();
+    q.country      = m.value("country").toString();
+    q.dxccId       = m.value("dxcc_id").toInt();
+    q.cqZone       = m.value("cq_zone").toInt();
+    q.ituZone      = m.value("itu_zone").toInt();
+    q.continent    = m.value("continent").toString();
+    q.lat          = m.value("lat").toDouble();
+    q.lon          = m.value("lon").toDouble();
+    q.state        = m.value("state").toString();
+    q.gridsquare   = m.value("gridsquare").toString();
+    q.distance     = m.value("distance").toInt();
+    q.bearing      = m.value("bearing").toInt();
+    q.power        = m.value("power").toDouble();
+    q.comment      = m.value("comment").toString();
+    q.notes        = m.value("notes").toString();
+    q.iota         = m.value("iota").toString();
+    q.sotaRef      = m.value("sota_ref").toString();
+    q.potaRef      = m.value("pota_ref").toString();
+    q.contestId    = m.value("contest_id").toString();
+    q.srx          = m.value("srx").toString();
+    q.stx          = m.value("stx").toString();
+    q.manager      = m.value("manager").toString();
+    q.operatorCall = m.value("operator_call").toString();
+    q.stationCall  = m.value("station_call").toString();
+    q.qslSent      = m.value("qsl_sent","N").toString();
+    q.qslRcvd      = m.value("qsl_rcvd","N").toString();
+    q.lotwSent     = m.value("lotw_sent","N").toString();
+    q.lotwRcvd     = m.value("lotw_rcvd","N").toString();
+    q.eqslSent     = m.value("eqsl_sent","N").toString();
+    q.eqslRcvd     = m.value("eqsl_rcvd","N").toString();
+    q.clublogSent  = m.value("clublog_sent").toInt() != 0;
+    q.createdAt    = m.value("created_at").toString();
+    return q;
+}

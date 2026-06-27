@@ -1,0 +1,10 @@
+build/
+dist/
+installer/output/
+*.o
+*.obj
+*.exe
+*.dll
+*.a
+*.lib
+.qt/
