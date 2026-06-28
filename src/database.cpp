@@ -459,7 +459,7 @@ QList<Qso> Database::getAllQsos(const QsoFilter& filter) const
         qWarning() << "getAllQsos:" << q.lastError().text();
     }
 
-    if (!filter.hasFilter()) {
+    if (!filter.hasFilter() && isDefaultSort) {
         m_cache      = list;
         m_cacheValid = true;
         m_countCache = list.size();

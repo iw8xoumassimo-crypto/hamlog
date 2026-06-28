@@ -70,4 +70,5 @@ private:
     QString      m_highlight;
     QList<Spot>  m_spots;
     QByteArray   m_rxBuf;
+    QHash<QString, QDateTime> m_alertedSpots;
 };

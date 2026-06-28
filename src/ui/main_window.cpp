@@ -853,6 +853,18 @@ void MainWindow::onSettings()
                 startCat();
         }
 
+        // Riavvia listener UDP WSJT-X (porta può essere cambiata)
+        if (m_wsjtx)     { m_wsjtx->stop();     m_wsjtx->deleteLater();     m_wsjtx     = nullptr; }
+        if (m_wsjtx2333) { m_wsjtx2333->stop(); m_wsjtx2333->deleteLater(); m_wsjtx2333 = nullptr; }
+        startWsjtx();
+
+        // Riavvia server TCP Decodium (porta può essere cambiata)
+        if (m_adifTcp) {
+            m_adifTcp->close();
+            quint16 tcpPort = cfg.value("decodium/tcpPort", 2333).toUInt();
+            m_adifTcp->listen(tcpPort);
+        }
+
         // Aggiorna solo il percorso del watcher, senza ricreare l'oggetto
         QString watchPath = cfg.value("adifwatcher/path").toString();
         if (watchPath.isEmpty()) {

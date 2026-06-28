@@ -50,7 +50,12 @@ void CatService::connectRig()
     // Dopo la connessione riuscita collega errorOccurred per intercettare cadute future.
     // UniqueConnection evita duplicati se connectRig() viene chiamato di nuovo.
     connect(m_sock, &QTcpSocket::errorOccurred, this,
-            [this](){ emit error(m_sock->errorString()); },
+            [this](){
+                m_connected = false;
+                m_timer->stop();
+                emit disconnected();
+                emit error(m_sock->errorString());
+            },
             Qt::UniqueConnection);
     m_connected = true;
     m_timer->start();

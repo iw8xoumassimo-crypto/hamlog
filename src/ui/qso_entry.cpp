@@ -363,9 +363,9 @@ void QsoEntry::reset()
     QSettings cfg;
     bool lotwEnabled = !cfg.value("lotw/username").toString().isEmpty();
 
-    // Default: tutti e tre i servizi QSL spuntati per default
+    // Default: QSL e eQSL sempre spuntati; LoTW solo se configurato
     m_qslSent->setChecked(true);
-    m_lotwSent->setChecked(true);
+    m_lotwSent->setChecked(lotwEnabled);
     m_eqslSent->setChecked(true);
 
     auto setCombo = [](QComboBox* cb, const QString& val){
@@ -390,7 +390,7 @@ void QsoEntry::applyQslDefaults(const QString& callsign)
 
     // Se già lavorato: deseleziona (QSL già inviata in precedenza)
     m_qslSent->setChecked(!alreadyWorked);
-    m_lotwSent->setChecked(!alreadyWorked);
+    m_lotwSent->setChecked(!alreadyWorked && lotwEnabled);
     m_eqslSent->setChecked(!alreadyWorked);
 }
 
@@ -526,6 +526,9 @@ void QsoEntry::onSave()
         emit qsoSaved(q);
         reset();
         if (wasEdit) hide();
+    } else {
+        QMessageBox::critical(this, tr("Errore DB"),
+            tr("Impossibile salvare il QSO. Controlla il database."));
     }
 }
 

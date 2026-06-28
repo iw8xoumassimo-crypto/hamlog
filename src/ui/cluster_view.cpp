@@ -331,9 +331,14 @@ void ClusterView::parseSpot(const QString& line)
     m_spots.prepend(spot);
     if (m_spots.size() > 500) m_spots.removeLast();
 
-    // Notifica se stazione mai lavorata
-    if (Database::instance().searchQsos(spot.callsign).isEmpty())
-        emit newNeededSpot(spot.callsign, spot.freq / 1000.0, spot.band, spot.mode);
+    // Notifica se stazione mai lavorata (cooldown 5 min per evitare beep continui)
+    if (Database::instance().searchQsos(spot.callsign).isEmpty()) {
+        QDateTime& last = m_alertedSpots[spot.callsign];
+        if (!last.isValid() || last.secsTo(QDateTime::currentDateTime()) > 300) {
+            last = QDateTime::currentDateTime();
+            emit newNeededSpot(spot.callsign, spot.freq / 1000.0, spot.band, spot.mode);
+        }
+    }
 
     appendSpot(spot);
 }

@@ -245,8 +245,23 @@ void AdifTcpServer::onReadyRead()
     if (!sock) return;
     m_bufs[sock] += sock->readAll();
 
+    // Ricerca case-insensitive di <EOR> senza copiare il buffer intero (O(N²) → O(N))
+    auto findEor = [](const QByteArray& buf) -> int {
+        const char* p = buf.constData();
+        int n = buf.size() - 4;
+        for (int i = 0; i < n; ++i) {
+            if (p[i] == '<' &&
+                (p[i+1] == 'E' || p[i+1] == 'e') &&
+                (p[i+2] == 'O' || p[i+2] == 'o') &&
+                (p[i+3] == 'R' || p[i+3] == 'r') &&
+                 p[i+4] == '>')
+                return i;
+        }
+        return -1;
+    };
+
     while (true) {
-        int eor = m_bufs[sock].toUpper().indexOf("<EOR>");
+        int eor = findEor(m_bufs[sock]);
         if (eor < 0) break;
         QByteArray record = m_bufs[sock].left(eor + 5);
         m_bufs[sock] = m_bufs[sock].mid(eor + 5);
