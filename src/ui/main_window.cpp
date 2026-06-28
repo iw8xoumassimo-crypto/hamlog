@@ -519,16 +519,16 @@ void MainWindow::loadSettings()
                            + "/AppData/Local";
         decodiumFile = localApp + "/IU8LMC/Decodium/decodium_log.adi";
     }
-    // Helper: applica default QSL (Y se prima volta, N se già lavorato)
+    // Helper: applica default QSL (Y se prima volta, N se già lavorato).
+    // Sovrascrive sempre: importAdif() mette "N" come placeholder anche quando
+    // il campo non era presente nell'ADIF, quindi il check isEmpty() non funziona.
     auto applyQslDefaults = [](QList<Qso>& batch) {
         for (Qso& q : batch) {
-            if (!q.qslSent.isEmpty() && !q.lotwSent.isEmpty() && !q.eqslSent.isEmpty())
-                continue;  // già impostati dall'ADIF
             bool alreadyWorked = !Database::instance().searchQsos(q.callsign).isEmpty();
             QString def = alreadyWorked ? "N" : "Y";
-            if (q.qslSent.isEmpty())  q.qslSent  = def;
-            if (q.lotwSent.isEmpty()) q.lotwSent = def;
-            if (q.eqslSent.isEmpty()) q.eqslSent = def;
+            q.qslSent  = def;
+            q.lotwSent = def;
+            q.eqslSent = def;
         }
     };
 
@@ -721,12 +721,13 @@ void MainWindow::onWsjtxQso(const Qso& qso)
 {
     Qso copy = qso;
 
-    // Default QSL: Y se prima volta, N se già lavorato
+    // Default QSL: Y se prima volta, N se già lavorato.
+    // Sovrascrive sempre: importAdif/parseQsoLogged mettono "N" come placeholder.
     bool alreadyWorked = !Database::instance().searchQsos(copy.callsign).isEmpty();
     QString def = alreadyWorked ? "N" : "Y";
-    if (copy.qslSent.isEmpty())  copy.qslSent  = def;
-    if (copy.lotwSent.isEmpty()) copy.lotwSent = def;
-    if (copy.eqslSent.isEmpty()) copy.eqslSent = def;
+    copy.qslSent  = def;
+    copy.lotwSent = def;
+    copy.eqslSent = def;
 
     int dups = 0;
     Database::instance().importQsos({copy}, &dups);
