@@ -35,6 +35,7 @@ public slots:
 
 signals:
     void spotClicked(const QString& callsign, double freqMhz, const QString& mode);
+    void newNeededSpot(const QString& callsign, double freqMhz, const QString& band, const QString& mode);
 
 private slots:
     void onConnect();

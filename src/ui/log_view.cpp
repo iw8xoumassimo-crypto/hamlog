@@ -197,7 +197,7 @@ LogView::LogView(QWidget* parent) : QWidget(parent)
     m_proxy = new QSortFilterProxyModel(this);
     m_proxy->setSourceModel(m_model);
     m_proxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
-    m_proxy->setFilterKeyColumn(C_CALLSIGN);
+    m_proxy->setFilterKeyColumn(-1); // cerca in tutte le colonne (nominativo, paese, nome…)
 
     m_table = new QTableView(this);
     m_table->setModel(m_proxy);

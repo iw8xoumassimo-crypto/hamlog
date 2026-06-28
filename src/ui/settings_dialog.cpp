@@ -1,5 +1,7 @@
 #include "settings_dialog.h"
 #include "../services.h"
+#include <algorithm>
+#include <windows.h>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QCheckBox>
@@ -14,6 +16,7 @@
 #include <QLabel>
 #include <QSettings>
 #include <QApplication>
+#include <QCoreApplication>
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent)
 {
@@ -145,17 +148,68 @@ void SettingsDialog::build()
     // CAT
     {
         auto* fl = makeTab(tr("CAT"));
-        m_catEnabled = new QCheckBox(tr("Abilita CAT"), this);
-        m_catBackend = new QComboBox(this);
-        m_catBackend->addItems({"rigctld","OmniRig"});
+        m_catEnabled = new QCheckBox(tr("Abilita CAT (frequenza automatica nel QSO)"), this);
+        m_catBackend = new QComboBox(this);   // mantenuto per compatibilità, nascosto
+        m_catBackend->addItems({"rigctld"});
+        m_catBackend->hide();
         m_catHost = new QLineEdit("127.0.0.1", this);
         m_catPort = new QSpinBox(this);
         m_catPort->setRange(1, 65535);
         m_catPort->setValue(4532);
         fl->addRow(m_catEnabled);
-        fl->addRow(tr("Backend:"),  m_catBackend);
-        fl->addRow(tr("Host:"),     m_catHost);
-        fl->addRow(tr("Porta:"),    m_catPort);
+        fl->addRow(tr("Host rigctld:"), m_catHost);
+        fl->addRow(tr("Porta TCP:"),    m_catPort);
+
+        // --- rigctld auto-start ---
+        fl->addRow(new QLabel(tr("<b>Avvio automatico rigctld</b> (condivisione CAT con Decodium e altre app):"), this));
+        m_rigctldAutoStart = new QCheckBox(tr("Avvia rigctld automaticamente all'apertura di HamLog"), this);
+        fl->addRow(m_rigctldAutoStart);
+
+        auto* pathRow = new QHBoxLayout;
+        m_rigctldPath = new QLineEdit(this);
+        m_rigctldPath->setPlaceholderText(tr("Percorso rigctld.exe"));
+        pathRow->addWidget(m_rigctldPath);
+        auto* btnRig = new QPushButton(tr("…"), this); btnRig->setMaximumWidth(30);
+        pathRow->addWidget(btnRig);
+        fl->addRow(tr("Eseguibile rigctld:"), pathRow);
+        connect(btnRig, &QPushButton::clicked, this, &SettingsDialog::onBrowseRigctld);
+
+        auto* comRow = new QHBoxLayout;
+        m_rigctldComPort = new QComboBox(this);
+        m_rigctldComPort->setEditable(true);
+        m_rigctldComPort->setInsertPolicy(QComboBox::NoInsert);
+        m_rigctldComPort->lineEdit()->setPlaceholderText(tr("es. COM5"));
+        comRow->addWidget(m_rigctldComPort, 1);
+        auto* btnRefreshCom = new QPushButton(tr("↺"), this);
+        btnRefreshCom->setMaximumWidth(30);
+        btnRefreshCom->setToolTip(tr("Aggiorna lista porte COM disponibili"));
+        comRow->addWidget(btnRefreshCom);
+        fl->addRow(tr("Porta COM radio:"), comRow);
+        connect(btnRefreshCom, &QPushButton::clicked, this, &SettingsDialog::refreshComPorts);
+        refreshComPorts();
+
+        m_rigctldModel = new QSpinBox(this);
+        m_rigctldModel->setRange(1, 9999);
+        m_rigctldModel->setValue(1035);
+        m_rigctldModel->setToolTip(tr("FT-991A = 1035  |  FT-891 = 1036  |  FT-818 = 1038\n"
+                                      "IC-7300 = 3073  |  IC-9700 = 3081\n"
+                                      "Vedi: https://hamlib.github.io/riglist.html"));
+        fl->addRow(tr("Modello Hamlib (es. 1035=FT-991A):"), m_rigctldModel);
+
+        m_rigctldBaud = new QComboBox(this);
+        m_rigctldBaud->addItems({"4800","9600","19200","38400","57600","115200"});
+        m_rigctldBaud->setCurrentText("38400");
+        fl->addRow(tr("Velocità seriale (baud):"), m_rigctldBaud);
+
+        // abilita/disabilita campi in base al checkbox autostart
+        auto updateRigFields = [this](bool en) {
+            m_rigctldPath->setEnabled(en);
+            m_rigctldComPort->setEnabled(en);
+            m_rigctldModel->setEnabled(en);
+            m_rigctldBaud->setEnabled(en);
+        };
+        connect(m_rigctldAutoStart, &QCheckBox::toggled, updateRigFields);
+        updateRigFields(false);
     }
 
     // LoTW
@@ -229,6 +283,29 @@ void SettingsDialog::build()
         });
     }
 
+    // Sync automatica
+    {
+        auto* fl = makeTab(tr("Sync Auto"));
+        m_syncEnabled  = new QCheckBox(tr("Abilita sincronizzazione automatica"), this);
+        m_syncInterval = new QSpinBox(this);
+        m_syncInterval->setRange(5, 1440);
+        m_syncInterval->setValue(60);
+        m_syncInterval->setSuffix(tr(" minuti"));
+        m_syncLotw = new QCheckBox(tr("LoTW — scarica QSL ricevute"), this);
+        m_syncEqsl = new QCheckBox(tr("eQSL — scarica QSL ricevute"), this);
+        fl->addRow(m_syncEnabled);
+        fl->addRow(tr("Ogni:"), m_syncInterval);
+        fl->addRow(new QLabel(tr("Servizi da sincronizzare:"), this));
+        fl->addRow(m_syncLotw);
+        fl->addRow(m_syncEqsl);
+        connect(m_syncEnabled, &QCheckBox::toggled, m_syncInterval, &QSpinBox::setEnabled);
+        connect(m_syncEnabled, &QCheckBox::toggled, m_syncLotw,     &QCheckBox::setEnabled);
+        connect(m_syncEnabled, &QCheckBox::toggled, m_syncEqsl,     &QCheckBox::setEnabled);
+        m_syncInterval->setEnabled(false);
+        m_syncLotw->setEnabled(false);
+        m_syncEqsl->setEnabled(false);
+    }
+
     vl->addWidget(tabs);
 
     auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -263,6 +340,25 @@ void SettingsDialog::load()
     m_catHost->setText(cfg.value("cat/host","127.0.0.1").toString());
     m_catPort->setValue(cfg.value("cat/port",4532).toInt());
 
+    {
+        bool autoStart = cfg.value("cat/rigctld_autostart", false).toBool();
+        m_rigctldAutoStart->setChecked(autoStart);
+        m_rigctldPath->setText(cfg.value("cat/rigctld_path",
+            QCoreApplication::applicationDirPath() + "/rigctld.exe").toString());
+        {
+            QString saved = cfg.value("cat/rigctld_comport", "COM5").toString();
+            int idx = m_rigctldComPort->findText(saved, Qt::MatchFixedString);
+            if (idx >= 0) m_rigctldComPort->setCurrentIndex(idx);
+            else           m_rigctldComPort->setCurrentText(saved);
+        }
+        m_rigctldModel->setValue(cfg.value("cat/rigctld_model", 1035).toInt());
+        m_rigctldBaud->setCurrentText(cfg.value("cat/rigctld_baud","38400").toString());
+        m_rigctldPath->setEnabled(autoStart);
+        m_rigctldComPort->setEnabled(autoStart);
+        m_rigctldModel->setEnabled(autoStart);
+        m_rigctldBaud->setEnabled(autoStart);
+    }
+
     m_lotwCall->setText(cfg.value("lotw/username").toString());
     m_lotwPass->setText(cfg.value("lotw/password").toString());
     m_tqslPath->setText(cfg.value("lotw/tqsl_path","tqsl").toString());
@@ -283,6 +379,15 @@ void SettingsDialog::load()
     m_wsjtxPort->setValue(cfg.value("wsjtx/port",2333).toInt());
 
     m_decodiumPath->setText(cfg.value("adifwatcher/path").toString());
+
+    bool syncEn = cfg.value("sync/enabled", false).toBool();
+    m_syncEnabled->setChecked(syncEn);
+    m_syncInterval->setValue(cfg.value("sync/intervalMinutes", 60).toInt());
+    m_syncLotw->setChecked(cfg.value("sync/lotw", true).toBool());
+    m_syncEqsl->setChecked(cfg.value("sync/eqsl", true).toBool());
+    m_syncInterval->setEnabled(syncEn);
+    m_syncLotw->setEnabled(syncEn);
+    m_syncEqsl->setEnabled(syncEn);
 }
 
 void SettingsDialog::save()
@@ -306,10 +411,15 @@ void SettingsDialog::save()
 
     { QString p = m_dbPath->text().trimmed(); if (!p.isEmpty()) cfg.setValue("database/path", p); }
 
-    cfg.setValue("cat/enabled",       m_catEnabled->isChecked());
-    cfg.setValue("cat/backend",       m_catBackend->currentText());
-    cfg.setValue("cat/host",          m_catHost->text().trimmed());
-    cfg.setValue("cat/port",          m_catPort->value());
+    cfg.setValue("cat/enabled",              m_catEnabled->isChecked());
+    cfg.setValue("cat/backend",              m_catBackend->currentText());
+    cfg.setValue("cat/host",                 m_catHost->text().trimmed());
+    cfg.setValue("cat/port",                 m_catPort->value());
+    cfg.setValue("cat/rigctld_autostart",    m_rigctldAutoStart->isChecked());
+    cfg.setValue("cat/rigctld_path",         m_rigctldPath->text().trimmed());
+    cfg.setValue("cat/rigctld_comport",      m_rigctldComPort->currentText().trimmed());
+    cfg.setValue("cat/rigctld_model",        m_rigctldModel->value());
+    cfg.setValue("cat/rigctld_baud",         m_rigctldBaud->currentText());
 
     cfg.setValue("lotw/username",     m_lotwCall->text().trimmed());
     cfg.setValue("lotw/password",     m_lotwPass->text());
@@ -331,6 +441,11 @@ void SettingsDialog::save()
     cfg.setValue("wsjtx/port",        m_wsjtxPort->value());
 
     cfg.setValue("adifwatcher/path",  m_decodiumPath->text().trimmed());
+
+    cfg.setValue("sync/enabled",         m_syncEnabled->isChecked());
+    cfg.setValue("sync/intervalMinutes", m_syncInterval->value());
+    cfg.setValue("sync/lotw",            m_syncLotw->isChecked());
+    cfg.setValue("sync/eqsl",            m_syncEqsl->isChecked());
 }
 
 void SettingsDialog::onAccept()
@@ -351,4 +466,56 @@ void SettingsDialog::onBrowseTqsl()
     QString f = QFileDialog::getOpenFileName(this, tr("Eseguibile tqsl"),
                 m_tqslPath->text());
     if (!f.isEmpty()) m_tqslPath->setText(f);
+}
+
+void SettingsDialog::onBrowseRigctld()
+{
+    QString f = QFileDialog::getOpenFileName(this, tr("Eseguibile rigctld"),
+                m_rigctldPath->text(), tr("Eseguibili (*.exe);;Tutti (*)"));
+    if (!f.isEmpty()) m_rigctldPath->setText(f);
+}
+
+void SettingsDialog::refreshComPorts()
+{
+    QString current = m_rigctldComPort->currentText();
+    m_rigctldComPort->clear();
+
+    // Legge le porte COM dal registro di Windows via WinAPI
+    // (QSettings non funziona: i nomi chiave contengono '\' che viene interpretato come separatore)
+    QStringList ports;
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                      L"HARDWARE\\DEVICEMAP\\SERIALCOMM",
+                      0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD idx = 0;
+        wchar_t valName[256], valData[256];
+        DWORD nameLen, dataLen, type;
+        while (true) {
+            nameLen = 256; dataLen = sizeof(valData);
+            LONG res = RegEnumValueW(hKey, idx++, valName, &nameLen,
+                                     nullptr, &type, (LPBYTE)valData, &dataLen);
+            if (res != ERROR_SUCCESS) break;
+            if (type == REG_SZ)
+                ports << QString::fromWCharArray(valData);
+        }
+        RegCloseKey(hKey);
+    }
+
+    // Fallback: se il registro non restituisce nulla, proponi COM1-COM20
+    if (ports.isEmpty())
+        for (int i = 1; i <= 20; ++i)
+            ports << QString("COM%1").arg(i);
+
+    // Ordina numericamente (COM1, COM2, … COM10, COM11…)
+    std::sort(ports.begin(), ports.end(), [](const QString& a, const QString& b){
+        return a.mid(3).toInt() < b.mid(3).toInt();
+    });
+
+    m_rigctldComPort->addItems(ports);
+
+    if (!current.isEmpty()) {
+        int idx = m_rigctldComPort->findText(current, Qt::MatchFixedString);
+        if (idx >= 0) m_rigctldComPort->setCurrentIndex(idx);
+        else           m_rigctldComPort->setCurrentText(current);
+    }
 }

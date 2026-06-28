@@ -36,16 +36,22 @@ void CatService::connectRig()
     }
 #endif
     // rigctld TCP
-    if (!m_sock) {
+    if (!m_sock)
         m_sock = new QTcpSocket(this);
-        connect(m_sock, &QTcpSocket::errorOccurred, this,
-                [this](){ emit error(m_sock->errorString()); });
-    }
+
     m_sock->connectToHost(m_host, m_port);
     if (!m_sock->waitForConnected(3000)) {
+        // waitForConnected fa girare l'event loop internamente: errorOccurred può sparare
+        // prima che arriviamo qui. Emettiamo error() una volta sola — non connettiamo
+        // errorOccurred prima della connessione per evitare la doppia emissione.
         emit error("rigctld: " + m_sock->errorString());
         return;
     }
+    // Dopo la connessione riuscita collega errorOccurred per intercettare cadute future.
+    // UniqueConnection evita duplicati se connectRig() viene chiamato di nuovo.
+    connect(m_sock, &QTcpSocket::errorOccurred, this,
+            [this](){ emit error(m_sock->errorString()); },
+            Qt::UniqueConnection);
     m_connected = true;
     m_timer->start();
     emit connected();

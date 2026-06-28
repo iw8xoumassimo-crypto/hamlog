@@ -411,8 +411,10 @@ Qso Database::getQso(int id) const
 
 QList<Qso> Database::getAllQsos(const QsoFilter& filter) const
 {
-    // Return cache when no filter applied
-    if (!filter.hasFilter()) {
+    // Cache valida solo per l'ordinamento di default (date DESC) senza filtri
+    bool isDefaultSort = (filter.orderBy.isEmpty() || filter.orderBy == "date") &&
+                         (filter.orderDir.isEmpty() || filter.orderDir.toUpper() == "DESC");
+    if (!filter.hasFilter() && isDefaultSort) {
         if (m_cacheValid) return m_cache;
     }
 
@@ -425,6 +427,9 @@ QList<Qso> Database::getAllQsos(const QsoFilter& filter) const
     if (!filter.continent.isEmpty()) sql += " AND continent=:cont";
     if (!filter.country.isEmpty())   sql += " AND country=:country";
     if (filter.lotwConfirmed)        sql += " AND lotw_rcvd='Y'";
+    if (filter.lotwNotSent)         sql += " AND (lotw_sent IS NULL OR lotw_sent!='Y')";
+    if (filter.eqslNotSent)         sql += " AND (eqsl_sent IS NULL OR eqsl_sent!='Y')";
+    if (filter.clublogNotSent)      sql += " AND (clublog_sent IS NULL OR clublog_sent!='Y')";
 
     static const QStringList validCols = {
         "date","callsign","band","mode","rst_sent","rst_rcvd",
@@ -485,8 +490,9 @@ bool Database::qsoExists(const QString& callsign, const QString& date,
                           const QString& mode) const
 {
     QSqlQuery q(db());
-    q.prepare("SELECT 1 FROM qso WHERE callsign=:cs AND date=:dt "
+    q.prepare("SELECT 1 FROM qso WHERE log_id=:log AND callsign=:cs AND date=:dt "
               "AND time_on=:ton AND band=:band AND mode=:mode LIMIT 1");
+    q.bindValue(":log",  m_currentLog);
     q.bindValue(":cs",   callsign.toUpper());
     q.bindValue(":dt",   date);
     q.bindValue(":ton",  timeOn);
@@ -536,11 +542,11 @@ bool Database::deleteLog(int id, bool deleteQsos)
     if (deleteQsos) {
         q.prepare("DELETE FROM qso WHERE log_id=:id");
         q.bindValue(":id", id);
-        q.exec();
+        if (!q.exec()) { d.rollback(); return false; }
     } else {
         q.prepare("UPDATE qso SET log_id=1 WHERE log_id=:id");
         q.bindValue(":id", id);
-        q.exec();
+        if (!q.exec()) { d.rollback(); return false; }
     }
     q.prepare("DELETE FROM logs WHERE id=:id AND id!=1");
     q.bindValue(":id", id);
@@ -967,8 +973,8 @@ QHash<QString,QString> Database::getCallbookCache(const QString& callsign) const
     QHash<QString,QString> result;
     if (!q.exec() || !q.next()) return result;
 
-    // Expire after 30 days
-    QDateTime fetched = QDateTime::fromString(q.value(1).toString(), Qt::ISODate);
+    // Expire after 30 days (SQLite datetime() format: "yyyy-MM-dd HH:mm:ss")
+    QDateTime fetched = QDateTime::fromString(q.value(1).toString(), "yyyy-MM-dd HH:mm:ss");
     if (fetched.daysTo(QDateTime::currentDateTimeUtc()) > 30)
         return result;
 

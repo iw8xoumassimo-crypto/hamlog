@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QDebug>
+#include <QCoreApplication>
 #include "database.h"
 #include "dxcc.h"
 #include "theme_manager.h"
@@ -22,6 +23,10 @@ int main(int argc, char* argv[])
         if (!cfg.contains(key) || cfg.value(key).toString().isEmpty())
             cfg.setValue(key, val);
     };
+    // rigctld nella stessa cartella dell'eseguibile
+    setDefault("cat/rigctld_path",
+               QCoreApplication::applicationDirPath() + "/rigctld.exe");
+
     setDefault("station/callsign", "N0CALL");
     setDefault("station/operator", "N0CALL");
     setDefault("lotw/username",    "");

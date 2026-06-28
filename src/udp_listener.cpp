@@ -324,6 +324,7 @@ void AdifWatcher::checkFile()
     }
 
     qint64 size = f.size();
+    if (size < m_lastPos) m_lastPos = 0;   // file rimpiazzato/troncato — rileggi dall'inizio
     if (size <= m_lastPos) { f.close(); return; }  // nessun nuovo dato
 
     f.seek(m_lastPos);

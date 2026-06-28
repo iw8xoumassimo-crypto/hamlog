@@ -107,4 +107,9 @@ private:
 
     int     m_editId = 0;   // 0 = new QSO
     bool    m_catLocked = false;
+
+    // Valori originali QSL sent — preservano stati intermedi (Q/R/I) al salvataggio
+    QString m_origQslSent;
+    QString m_origLotwSent;
+    QString m_origEqslSent;
 };

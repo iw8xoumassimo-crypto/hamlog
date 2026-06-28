@@ -27,6 +27,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "C:\hamlog-cpp\dist\HamLog\HamLog.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\hamlog-cpp\dist\HamLog\rigctld.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "C:\hamlog-cpp\dist\HamLog\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "C:\hamlog-cpp\dist\HamLog\generic\*"; DestDir: "{app}\generic"; Flags: ignoreversion recursesubdirs
 Source: "C:\hamlog-cpp\dist\HamLog\iconengines\*"; DestDir: "{app}\iconengines"; Flags: ignoreversion recursesubdirs

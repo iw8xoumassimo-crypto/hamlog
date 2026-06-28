@@ -15,6 +15,9 @@
 #include "dx_hunter_dialog.h"
 #include "qsl_dialog.h"
 #include "world_map_widget.h"
+#include "export_adif_dialog.h"
+#include "qsl_label_dialog.h"
+#include "contest_dialog.h"
 #include "../database.h"
 #include "../services.h"
 #include "../cat_service.h"
@@ -37,6 +40,7 @@
 #include <QFile>
 #include <QStandardPaths>
 #include <QCloseEvent>
+#include <QDate>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QProgressDialog>
@@ -44,6 +48,8 @@
 #include <QStyle>
 #include <QShortcut>
 #include <QDebug>
+#include <QProcess>
+#include <memory>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
@@ -65,12 +71,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
 MainWindow::~MainWindow()
 {
-    saveLayout();
     saveSettings();
 }
 
 void MainWindow::closeEvent(QCloseEvent* ev)
 {
+    m_statusTimer->stop();
+    m_syncTimer->stop();
+    if (m_rigctldProcess && m_rigctldProcess->state() != QProcess::NotRunning) {
+        m_rigctldProcess->terminate();
+        m_rigctldProcess->waitForFinished(3000);
+    }
     saveLayout();
     saveSettings();
     ev->accept();
@@ -153,6 +164,13 @@ void MainWindow::buildMenu()
     QMenu* tools = menuBar()->addMenu(tr("&Strumenti"));
     m_actIntegrity = tools->addAction(tr("&Controllo Integrità…"), this, &MainWindow::onIntegrity);
     m_actQslDialog = tools->addAction(tr("&Gestione QSL…"),        this, &MainWindow::onQslDialog);
+    tools->addAction(tr("Stampa &Etichette QSL…"), this, [this]{
+        QslLabelDialog dlg(this); dlg.exec();
+    });
+    tools->addSeparator();
+    tools->addAction(tr("&Modalità Contest…"), this, [this]{
+        ContestDialog dlg(this); dlg.exec(); m_logView->refresh(); updateStatusBar();
+    });
     tools->addSeparator();
     tools->addAction(tr("Gestione &Duplicati…"),               this, &MainWindow::onDuplicates);
     tools->addAction(tr("Recupera Nome/&QTH dal Callbook…"),   this, &MainWindow::onBackfillNames);
@@ -281,6 +299,14 @@ void MainWindow::connectSignals()
         m_callbook->lookup(cs);
     });
 
+    // Doppio click su QSO -> apri per modifica
+    connect(m_logView, &LogView::qsoDoubleClicked, this, [this](const Qso& q) {
+        m_qsoEntry->loadQso(q);
+        m_qsoEntry->show();
+        m_qsoEntry->raise();
+        m_qsoEntry->activateWindow();
+    });
+
     // QSO entry -> cluster highlight on every character change
     connect(m_qsoEntry, &QsoEntry::callsignChanged, m_clusterView, &ClusterView::highlightCall);
 
@@ -291,8 +317,35 @@ void MainWindow::connectSignals()
     // Callbook result -> auto-fill QSO entry name/QTH/grid
     connect(m_callbook, &CallbookPanel::callbookData, m_qsoEntry, &QsoEntry::fillFromCallbook);
 
+    // Callbook result -> aggiorna anche tutti i QSO nel DB con quel nominativo
+    connect(m_callbook, &CallbookPanel::callbookData, this,
+            [this](const QString& cs, const QString& name, const QString& qth,
+                   const QString& grid, const QString&){
+        if (name.isEmpty() && qth.isEmpty() && grid.isEmpty()) return;
+        int n = Database::instance().applyCallbookToQsos(cs, name, qth, grid);
+        if (n > 0) m_logView->refresh();
+    });
+
     // Cluster spot clicked -> fill QSO entry
     connect(m_clusterView, &ClusterView::spotClicked, m_qsoEntry, &QsoEntry::fillFromSpot);
+
+    // Cluster: notifica spot nuovi (non ancora lavorati)
+    connect(m_clusterView, &ClusterView::newNeededSpot,
+            this, [this](const QString& call, double freq, const QString& band, const QString& mode){
+        QString msg = tr("★ NUOVO: %1 — %2 MHz %3 %4")
+                          .arg(call)
+                          .arg(freq, 0, 'f', 3)
+                          .arg(band)
+                          .arg(mode.isEmpty() ? QString() : QString("[%1]").arg(mode));
+        m_lblWsjtx->setText(msg);
+        m_lblWsjtx->setStyleSheet("color: #cc0000; font-weight: bold;");
+        QApplication::beep();
+        // Reset style dopo 10 s
+        QTimer::singleShot(10000, m_lblWsjtx, [this]{
+            m_lblWsjtx->setStyleSheet(QString());
+        });
+        statusBar()->showMessage(msg, 8000);
+    });
 
     // Status + log refresh timer (every 3 seconds)
     m_statusTimer = new QTimer(this);
@@ -318,6 +371,117 @@ void MainWindow::connectSignals()
     m_clockTimer->setInterval(1000);
     connect(m_clockTimer, &QTimer::timeout, this, updateClock);
     m_clockTimer->start();
+
+    // Sync automatica LoTW/eQSL
+    m_syncTimer = new QTimer(this);
+    connect(m_syncTimer, &QTimer::timeout, this, &MainWindow::onAutoSync);
+    applySyncTimer();
+}
+
+void MainWindow::applySyncTimer()
+{
+    QSettings cfg;
+    m_syncTimer->stop();
+    if (cfg.value("sync/enabled", false).toBool()) {
+        int mins = cfg.value("sync/intervalMinutes", 60).toInt();
+        m_syncTimer->setInterval(mins * 60 * 1000);
+        m_syncTimer->start();
+    }
+}
+
+void MainWindow::onAutoSync()
+{
+    QSettings cfg;
+    QString since = QDate::currentDate().addDays(-30).toString("yyyy-MM-dd");
+
+    if (cfg.value("sync/lotw", true).toBool()) {
+        QString user = cfg.value("lotw/username").toString();
+        QString pass = cfg.value("lotw/password").toString();
+        if (!user.isEmpty() && !pass.isEmpty()) {
+            auto* svc = new LotwService(this);
+            connect(svc, &LotwService::finished, this, [this, svc](bool ok, const QString& msg){
+                if (ok) { m_logView->refresh(); updateStatusBar(); }
+                statusBar()->showMessage(tr("Sync LoTW: %1").arg(msg), 5000);
+                svc->deleteLater();
+            });
+            svc->fetchQsls(user, pass, since);
+        }
+    }
+
+    if (cfg.value("sync/eqsl", true).toBool()) {
+        QString user = cfg.value("eqsl/username").toString();
+        QString pass = cfg.value("eqsl/password").toString();
+        if (!user.isEmpty() && !pass.isEmpty()) {
+            auto* svc = new EqslService(this);
+            connect(svc, &EqslService::finished, this, [this, svc](bool ok, const QString& msg){
+                if (ok) { m_logView->refresh(); updateStatusBar(); }
+                statusBar()->showMessage(tr("Sync eQSL: %1").arg(msg), 5000);
+                svc->deleteLater();
+            });
+            svc->fetchInbox(user, pass, since);
+        }
+    }
+}
+
+void MainWindow::applyRigctld()
+{
+    // Ferma eventuale processo precedente
+    if (m_rigctldProcess) {
+        if (m_rigctldProcess->state() != QProcess::NotRunning) {
+            m_rigctldProcess->terminate();
+            m_rigctldProcess->waitForFinished(3000);
+        }
+        m_rigctldProcess->deleteLater();
+        m_rigctldProcess = nullptr;
+    }
+
+    QSettings cfg;
+    if (!cfg.value("cat/rigctld_autostart", false).toBool()) return;
+
+    QString exe     = cfg.value("cat/rigctld_path").toString();
+    QString com     = cfg.value("cat/rigctld_comport").toString();
+    int     model   = cfg.value("cat/rigctld_model", 1035).toInt();
+    QString baud    = cfg.value("cat/rigctld_baud", "38400").toString();
+    int     port    = cfg.value("cat/port", 4532).toInt();
+
+    if (exe.isEmpty() || com.isEmpty()) {
+        statusBar()->showMessage(tr("rigctld: percorso eseguibile o porta COM non configurati"), 6000);
+        return;
+    }
+
+    // Converti COM3 -> \\.\COM3  (necessario per Hamlib su Windows)
+    QString comArg = com.toUpper().startsWith("COM") ? "\\\\.\\" + com : com;
+
+    QStringList args = {
+        "-m", QString::number(model),
+        "-r", comArg,
+        "-s", baud,
+        "-t", QString::number(port),
+        "--set-conf", "data_bits=8,stop_bits=1,serial_parity=None"
+    };
+
+    m_rigctldProcess = new QProcess(this);
+    m_rigctldProcess->setProgram(exe);
+    m_rigctldProcess->setArguments(args);
+    m_rigctldProcess->start();
+
+    if (!m_rigctldProcess->waitForStarted(3000)) {
+        statusBar()->showMessage(tr("rigctld: impossibile avviare — verificare percorso e porta COM"), 8000);
+        m_rigctldProcess->deleteLater();
+        m_rigctldProcess = nullptr;
+        return;
+    }
+
+    // Cattura proc per valore: m_rigctldProcess può diventare nullptr prima che il processo emetta
+    QProcess* proc = m_rigctldProcess;
+    connect(proc, &QProcess::errorOccurred,
+            this, [this, proc](QProcess::ProcessError err){
+        Q_UNUSED(err)
+        statusBar()->showMessage(tr("rigctld: errore — %1").arg(proc->errorString()), 8000);
+    });
+
+    statusBar()->showMessage(tr("rigctld avviato (PID %1) su porta %2")
+                             .arg(m_rigctldProcess->processId()).arg(port), 5000);
 }
 
 // ---------------------------------------------------------------------------
@@ -328,9 +492,20 @@ void MainWindow::loadSettings()
     QSettings cfg;
     m_currentTheme = cfg.value("ui/theme", "Default").toString();
 
+    // Avvia rigctld se configurato
+    applyRigctld();
+
     // Start CAT if configured
     bool catEnabled = cfg.value("cat/enabled", false).toBool();
-    if (catEnabled) startCat();
+    if (catEnabled) {
+        bool rigctldAutoStart = cfg.value("cat/rigctld_autostart", false).toBool();
+        if (rigctldAutoStart && m_rigctldProcess) {
+            // rigctld appena avviato: aspetta 1.5s prima di connettersi
+            QTimer::singleShot(1500, this, &MainWindow::startCat);
+        } else {
+            startCat();
+        }
+    }
 
     // Start WSJT-X listener if enabled
     bool wsjtxEnabled = cfg.value("wsjtx/enabled", true).toBool();
@@ -344,12 +519,26 @@ void MainWindow::loadSettings()
                            + "/AppData/Local";
         decodiumFile = localApp + "/IU8LMC/Decodium/decodium_log.adi";
     }
+    // Helper: applica default QSL (Y se prima volta, N se già lavorato)
+    auto applyQslDefaults = [](QList<Qso>& batch) {
+        for (Qso& q : batch) {
+            if (!q.qslSent.isEmpty() && !q.lotwSent.isEmpty() && !q.eqslSent.isEmpty())
+                continue;  // già impostati dall'ADIF
+            bool alreadyWorked = !Database::instance().searchQsos(q.callsign).isEmpty();
+            QString def = alreadyWorked ? "N" : "Y";
+            if (q.qslSent.isEmpty())  q.qslSent  = def;
+            if (q.lotwSent.isEmpty()) q.lotwSent = def;
+            if (q.eqslSent.isEmpty()) q.eqslSent = def;
+        }
+    };
+
     // Avvia sempre il watcher — se il file non esiste ancora, il poll timer (5 s)
     // lo rileverà quando Decodium lo creerà
     m_adifWatcher = new AdifWatcher(this);
-    connect(m_adifWatcher, &AdifWatcher::qsosFound, this, [this](const QList<Qso>& qsos){
+    connect(m_adifWatcher, &AdifWatcher::qsosFound, this, [this, applyQslDefaults](const QList<Qso>& qsos){
         int dups = 0;
         QList<Qso> batch = qsos;
+        applyQslDefaults(batch);
         int total = batch.size();
         Database::instance().importQsos(batch, &dups);
         int saved = total - dups;
@@ -360,6 +549,8 @@ void MainWindow::loadSettings()
                 tr("Decodium: +%1 QSO%2").arg(saved)
                     .arg(dups ? tr(" (%1 dup)").arg(dups) : QString()),
                 4000);
+            for (const Qso& q : batch)
+                if (q.name.isEmpty()) m_callbook->lookup(q.callsign);
         }
     });
     connect(m_adifWatcher, &AdifWatcher::fileAppeared, this, [this]{
@@ -369,9 +560,10 @@ void MainWindow::loadSettings()
 
     // Server TCP ADIF — Decodium si connette QUI (ADIFTcpEnabled=true, ADIFTcpServer=127.0.0.1:2333)
     m_adifTcp = new AdifTcpServer(this);
-    connect(m_adifTcp, &AdifTcpServer::qsosReceived, this, [this](const QList<Qso>& qsos){
+    connect(m_adifTcp, &AdifTcpServer::qsosReceived, this, [this, applyQslDefaults](const QList<Qso>& qsos){
         int dups = 0;
         QList<Qso> batch = qsos;
+        applyQslDefaults(batch);
         int total = batch.size();
         Database::instance().importQsos(batch, &dups);
         int saved = total - dups;
@@ -379,6 +571,8 @@ void MainWindow::loadSettings()
             m_logView->refresh();
             updateStatusBar();
             statusBar()->showMessage(tr("Decodium TCP: +%1 QSO").arg(saved), 4000);
+            for (const Qso& q : batch)
+                if (q.name.isEmpty()) m_callbook->lookup(q.callsign);
         }
     });
     connect(m_adifTcp, &AdifTcpServer::clientConnected, this, [this]{
@@ -457,10 +651,29 @@ void MainWindow::startCat()
                           cfg.value("cat/port",4532).toUInt());
 
     connect(m_cat, &CatService::stateChanged, this, &MainWindow::onCatStateChanged);
-    connect(m_cat, &CatService::error,        this, &MainWindow::onCatError);
     connect(m_cat, &CatService::connected,    this, [this]{ m_lblCat->setText("CAT: on"); });
     connect(m_cat, &CatService::disconnected, this, [this]{ m_lblCat->setText("CAT: off"); });
     connect(m_cat, &CatService::connected, m_qsoEntry, &QsoEntry::onCatConnected);
+
+    // Retry automatico se rigctld non è ancora pronto (max 5 tentativi)
+    bool autoStart = cfg.value("cat/rigctld_autostart", false).toBool();
+    if (autoStart) {
+        auto retryCount = std::make_shared<int>(0);
+        connect(m_cat, &CatService::error, this,
+                [this, retryCount](const QString& msg) {
+            if (*retryCount < 5 && m_rigctldProcess &&
+                m_rigctldProcess->state() == QProcess::Running &&
+                !m_cat->isConnected()) {
+                ++(*retryCount);
+                m_lblCat->setText(tr("CAT: attendo rigctld (%1/5)…").arg(*retryCount));
+                QTimer::singleShot(2000, m_cat, &CatService::connectRig);
+            } else {
+                onCatError(msg);
+            }
+        });
+    } else {
+        connect(m_cat, &CatService::error, this, &MainWindow::onCatError);
+    }
 
     m_cat->connectRig();
 }
@@ -507,6 +720,14 @@ void MainWindow::onCatError(const QString& msg)
 void MainWindow::onWsjtxQso(const Qso& qso)
 {
     Qso copy = qso;
+
+    // Default QSL: Y se prima volta, N se già lavorato
+    bool alreadyWorked = !Database::instance().searchQsos(copy.callsign).isEmpty();
+    QString def = alreadyWorked ? "N" : "Y";
+    if (copy.qslSent.isEmpty())  copy.qslSent  = def;
+    if (copy.lotwSent.isEmpty()) copy.lotwSent = def;
+    if (copy.eqslSent.isEmpty()) copy.eqslSent = def;
+
     int dups = 0;
     Database::instance().importQsos({copy}, &dups);
     m_logView->refresh();
@@ -557,13 +778,16 @@ void MainWindow::onImportAdif()
 
 void MainWindow::onExportAdif()
 {
+    ExportAdifDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
+
     QString file = QFileDialog::getSaveFileName(this, tr("Esporta ADIF"),
                    QString(), tr("File ADIF (*.adi)"));
     if (file.isEmpty()) return;
 
     QSettings cfg;
     QString myCall = cfg.value("station/callsign", "N0CALL").toString();
-    QList<Qso> qsos = Database::instance().getAllQsos();
+    QList<Qso> qsos = Database::instance().getAllQsos(dlg.filter());
     int n = AdifHandler::exportAdif(file, qsos, myCall);
     statusBar()->showMessage(tr("Esportati %1 QSO in ADIF").arg(n), 4000);
 }
@@ -607,10 +831,35 @@ void MainWindow::onSettings()
 {
     SettingsDialog dlg(this);
     if (dlg.exec() == QDialog::Accepted) {
-        loadSettings();
         updateWindowTitle();
-        QString theme = QSettings().value("ui/theme","Default").toString();
-        onChangeTheme(theme);
+        onChangeTheme(QSettings().value("ui/theme","Default").toString());
+        applySyncTimer();
+
+        // Ferma il vecchio CAT prima di riavviare
+        if (m_cat) {
+            m_cat->disconnectRig();
+            delete m_cat;
+            m_cat = nullptr;
+        }
+
+        // Un solo applyRigctld, poi startCat con eventuale delay
+        applyRigctld();
+        QSettings cfg;
+        if (cfg.value("cat/enabled", false).toBool()) {
+            bool rigAuto = cfg.value("cat/rigctld_autostart", false).toBool();
+            if (rigAuto && m_rigctldProcess)
+                QTimer::singleShot(1500, this, &MainWindow::startCat);
+            else
+                startCat();
+        }
+
+        // Aggiorna solo il percorso del watcher, senza ricreare l'oggetto
+        QString watchPath = cfg.value("adifwatcher/path").toString();
+        if (watchPath.isEmpty()) {
+            watchPath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
+                        + "/AppData/Local/IU8LMC/Decodium/decodium_log.adi";
+        }
+        if (m_adifWatcher) m_adifWatcher->watch(watchPath);
     }
 }
 

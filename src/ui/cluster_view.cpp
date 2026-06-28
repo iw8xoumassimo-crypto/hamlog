@@ -38,12 +38,27 @@ ClusterView::ClusterView(QWidget* parent) : QWidget(parent)
     connect(m_socket, &QTcpSocket::errorOccurred,this, &ClusterView::onSocketError);
     connect(m_keepAlive, &QTimer::timeout, this, &ClusterView::onKeepAlive);
 
+    // Auto-set porta quando si cambia server
+    connect(m_serverCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx){
+        QVariantList meta = m_serverCombo->itemData(idx).toList();
+        if (meta.size() >= 2)
+            m_port->setText(QString::number(meta[1].toInt()));
+    });
+
     // Load saved settings
     QSettings cfg;
-    QString savedHost = cfg.value("cluster/host","dxc.nc7j.com").toString();
-    int idx = m_serverCombo->findData(savedHost);
-    if (idx >= 0) m_serverCombo->setCurrentIndex(idx);
-    else { m_serverCombo->setEditText(savedHost); }
+    QString savedHost = cfg.value("cluster/host", "dxc.nc7j.com").toString();
+    bool found = false;
+    for (int i = 0; i < m_serverCombo->count(); ++i) {
+        QVariantList meta = m_serverCombo->itemData(i).toList();
+        if (!meta.isEmpty() && meta[0].toString() == savedHost) {
+            m_serverCombo->setCurrentIndex(i);
+            found = true;
+            break;
+        }
+    }
+    if (!found) { m_serverCombo->setCurrentIndex(-1); m_serverCombo->setEditText(savedHost); }
     m_port->setText(cfg.value("cluster/port","7373").toString());
     m_callsign->setText(cfg.value("station/callsign","N0CALL").toString());
 }
@@ -65,16 +80,30 @@ void ClusterView::build()
     m_serverCombo = new QComboBox(this);
     m_serverCombo->setEditable(true);
     m_serverCombo->setMinimumWidth(180);
-    struct { const char* label; const char* host; } servers[] = {
-        {"dxc.nc7j.com",         "dxc.nc7j.com"},
-        {"gb7djk (EU)",          "gb7djk.gb7djk.ampr.org"},
-        {"w3lpl.net",            "w3lpl.net"},
-        {"iz7auh.net (ITA)",     "iz7auh.net"},
-        {"dxc.dx.to",            "dxc.dx.to"},
-        {"hamqth.com",           "hamqth.com"},
+    struct { const char* label; const char* host; int port; } servers[] = {
+        // Italia
+        {"IZ5GST – Firenze (ITA)",   "dxc.iz5gst.it",          7373},
+        {"IK4ZHH – Bologna (ITA)",   "cluster.ik4zhh.it",       7300},
+        {"IW3SQY – Padova (ITA)",    "dxc.iw3sqy.it",           7373},
+        {"IR4M – Emilia (ITA)",      "dxc.ir4m.it",             7373},
+        {"IK5PWQ – Toscana (ITA)",   "dxcluster.ik5pwq.it",     7373},
+        // Europa
+        {"GB7DJK – UK (EU)",         "gb7djk.gb7djk.ampr.org",  7373},
+        {"DL5MBY – Germania (EU)",   "db0sue.de",               7373},
+        {"ON0AR – Belgio (EU)",      "on0ar.be",                7373},
+        {"EA5HT – Spagna (EU)",      "ea5ht.ure.es",            7373},
+        {"OZ5DX – Danimarca (EU)",   "oz5dx.oz5dx.ampr.org",    7373},
+        // Mondo
+        {"dxc.nc7j.com (NA)",        "dxc.nc7j.com",            7373},
+        {"w3lpl.net (NA)",           "w3lpl.net",               7373},
+        {"vk2io.com (OC)",           "vk2io.com",               7373},
+        {"dxc.dx.to (WW)",           "dxc.dx.to",               7373},
+        {"hamqth.com (WW)",          "hamqth.com",              7373},
     };
-    for (auto& s : servers)
-        m_serverCombo->addItem(QString(s.label), QString(s.host));
+    for (auto& s : servers) {
+        QVariantList meta = {QString(s.host), s.port};
+        m_serverCombo->addItem(QString(s.label), meta);
+    }
 
     m_port     = new QLineEdit("7373", this);
     m_port->setMaximumWidth(55);
@@ -175,7 +204,8 @@ void ClusterView::build()
 void ClusterView::onConnect()
 {
     // Resolve host: prefer user data (predefined), fallback to edit text
-    QString host = m_serverCombo->currentData().toString();
+    QVariantList _meta = m_serverCombo->currentData().toList();
+    QString host = _meta.isEmpty() ? QString() : _meta[0].toString();
     if (host.isEmpty()) host = m_serverCombo->currentText().trimmed();
     quint16 port = m_port->text().toUShort();
     if (host.isEmpty()) { consoleAppend(tr("*** Inserire host")); return; }
@@ -205,7 +235,8 @@ void ClusterView::onDisconnect()
 void ClusterView::onSocketConnected()
 {
     m_btnConn->setText(tr("Disconnetti"));
-    QString host = m_serverCombo->currentData().toString();
+    QVariantList _meta = m_serverCombo->currentData().toList();
+    QString host = _meta.isEmpty() ? QString() : _meta[0].toString();
     if (host.isEmpty()) host = m_serverCombo->currentText().trimmed();
     m_statusLbl->setText(tr("Connesso – %1").arg(host));
     consoleAppend(tr("*** Connesso a %1").arg(host));
@@ -299,6 +330,10 @@ void ClusterView::parseSpot(const QString& line)
 
     m_spots.prepend(spot);
     if (m_spots.size() > 500) m_spots.removeLast();
+
+    // Notifica se stazione mai lavorata
+    if (Database::instance().searchQsos(spot.callsign).isEmpty())
+        emit newNeededSpot(spot.callsign, spot.freq / 1000.0, spot.band, spot.mode);
 
     appendSpot(spot);
 }

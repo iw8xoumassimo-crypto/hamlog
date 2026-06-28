@@ -55,7 +55,7 @@ QList<Qso> importAdif(const QString& filename)
         {"TX_PWR","power"}, {"COMMENT","comment"}, {"NOTES","notes"},
         {"IOTA","iota"}, {"SOTA_REF","sota_ref"}, {"POTA_REF","pota_ref"},
         {"CONTEST_ID","contest_id"}, {"SRX","srx"}, {"STX","stx"},
-        {"OPERATOR","operator"}, {"STATION_CALLSIGN","station_call"},
+        {"OPERATOR","operator_call"}, {"STATION_CALLSIGN","station_call"},
         {"QSLVIA","manager"}, {"QSL_VIA","manager"},
         {"QSL_SENT","qsl_sent"}, {"QSL_RCVD","qsl_rcvd"},
         {"LOTW_QSL_SENT","lotw_sent"}, {"LOTW_QSL_RCVD","lotw_rcvd"},
@@ -143,8 +143,10 @@ int exportAdif(const QString& filename, const QList<Qso>& qsos,
     out << "<EOH>\n\n";
 
     auto add = [&](const QString& tag, const QString& val) {
-        if (!val.trimmed().isEmpty())
-            out << "<" << tag << ":" << val.size() << ">" << val;
+        if (!val.trimmed().isEmpty()) {
+            QByteArray utf8 = val.toUtf8();
+            out << "<" << tag << ":" << utf8.size() << ">" << val;
+        }
     };
 
     for (const Qso& q : qsos) {

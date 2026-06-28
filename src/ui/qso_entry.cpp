@@ -40,8 +40,10 @@ QsoEntry::QsoEntry(QWidget* parent) : QWidget(parent)
 {
     setWindowTitle(tr("Nuovo QSO"));
     setWindowFlags(Qt::Window | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint);
-    setMinimumWidth(520);
+    setMinimumSize(520, 460);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     build();
+    resize(580, 560);
 }
 
 void QsoEntry::build()
@@ -204,6 +206,8 @@ void QsoEntry::build()
     gl->addWidget(new QLabel(tr("Potenza (W):")),  row,2);
     gl->addWidget(m_power,                         row,3); ++row;
 
+    gl->setRowStretch(row, 1);   // spazio vuoto che assorbe l'espansione verticale
+
     tabs->addTab(basicW, tr("Base"));
 
     // -- Extra tab --
@@ -216,8 +220,10 @@ void QsoEntry::build()
     m_srx     = new QLineEdit(extraW);
     m_stx     = new QLineEdit(extraW);
     m_manager = new QLineEdit(extraW);
-    m_comment = new QPlainTextEdit(extraW); m_comment->setMaximumHeight(60);
-    m_notes   = new QPlainTextEdit(extraW); m_notes->setMaximumHeight(60);
+    m_comment = new QPlainTextEdit(extraW);
+    m_comment->setMinimumHeight(50);
+    m_notes   = new QPlainTextEdit(extraW);
+    m_notes->setMinimumHeight(50);
 
     fl->addRow(tr("IOTA:"),    m_iota);
     fl->addRow(tr("SOTA:"),    m_sota);
@@ -230,7 +236,8 @@ void QsoEntry::build()
     fl->addRow(tr("Note:"),   m_notes);
     tabs->addTab(extraW, tr("Extra"));
 
-    vl->addWidget(tabs);
+    tabs->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    vl->addWidget(tabs, 1);   // stretch=1: il tab cresce quando la finestra si allarga
 
     // ---- QSL Panel (always visible) ----
     auto* qslGrp = new QGroupBox(tr("QSL"), this);
@@ -332,6 +339,9 @@ void QsoEntry::build()
 void QsoEntry::reset()
 {
     m_editId = 0;
+    m_origQslSent.clear();
+    m_origLotwSent.clear();
+    m_origEqslSent.clear();
     setWindowTitle(tr("Nuovo QSO"));
 
     m_dupeInfo->hide();
@@ -353,9 +363,9 @@ void QsoEntry::reset()
     QSettings cfg;
     bool lotwEnabled = !cfg.value("lotw/username").toString().isEmpty();
 
-    // Default: send to all configured services (applyQslDefaults overrides if already worked)
+    // Default: tutti e tre i servizi QSL spuntati per default
     m_qslSent->setChecked(true);
-    m_lotwSent->setChecked(lotwEnabled);
+    m_lotwSent->setChecked(true);
     m_eqslSent->setChecked(true);
 
     auto setCombo = [](QComboBox* cb, const QString& val){
@@ -378,9 +388,9 @@ void QsoEntry::applyQslDefaults(const QString& callsign)
     bool lotwEnabled   = !cfg.value("lotw/username").toString().isEmpty();
     bool alreadyWorked = !Database::instance().searchQsos(callsign).isEmpty();
 
-    // If already in the log: uncheck all sent (QSL was already sent in a previous QSO)
+    // Se già lavorato: deseleziona (QSL già inviata in precedenza)
     m_qslSent->setChecked(!alreadyWorked);
-    m_lotwSent->setChecked(!alreadyWorked && lotwEnabled);
+    m_lotwSent->setChecked(!alreadyWorked);
     m_eqslSent->setChecked(!alreadyWorked);
 }
 
@@ -433,6 +443,10 @@ void QsoEntry::fillFrom(const Qso& q)
     m_comment->setPlainText(q.comment);
     m_notes->setPlainText(q.notes);
 
+    // Salva i valori originali per preservare stati intermedi (Q/R/I) al salvataggio
+    m_origQslSent  = q.qslSent;
+    m_origLotwSent = q.lotwSent;
+    m_origEqslSent = q.eqslSent;
     m_qslSent->setChecked(q.qslSent  != "N");
     m_lotwSent->setChecked(q.lotwSent != "N");
     m_eqslSent->setChecked(q.eqslSent != "N");
@@ -476,11 +490,18 @@ Qso QsoEntry::collectQso() const
     q.manager   = m_manager->text().trimmed();
     q.comment   = m_comment->toPlainText().trimmed();
     q.notes     = m_notes->toPlainText().trimmed();
-    q.qslSent   = m_qslSent->isChecked()  ? "Y" : "N";
+    // Preserva stati intermedi Q/R/I: se la checkbox è ancora spuntata e il valore
+    // originale non era né Y né N (es. Q=queued, R=requested, I=invalid), lo mantiene.
+    auto sentVal = [](bool checked, const QString& orig) -> QString {
+        if (!checked) return "N";
+        static const QStringList intermediate{"Q","R","I"};
+        return intermediate.contains(orig) ? orig : "Y";
+    };
+    q.qslSent   = sentVal(m_qslSent->isChecked(),  m_origQslSent);
     q.qslRcvd   = m_qslRcvd->currentText();
-    q.lotwSent  = m_lotwSent->isChecked() ? "Y" : "N";
+    q.lotwSent  = sentVal(m_lotwSent->isChecked(), m_origLotwSent);
     q.lotwRcvd  = m_lotwRcvd->currentText();
-    q.eqslSent  = m_eqslSent->isChecked() ? "Y" : "N";
+    q.eqslSent  = sentVal(m_eqslSent->isChecked(), m_origEqslSent);
     q.eqslRcvd  = m_eqslRcvd->currentText();
 
     QSettings cfg;

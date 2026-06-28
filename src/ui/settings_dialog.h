@@ -18,6 +18,8 @@ private slots:
     void onAccept();
     void onBrowseDb();
     void onBrowseTqsl();
+    void onBrowseRigctld();
+    void refreshComPorts();
 
 private:
     void build();
@@ -46,10 +48,16 @@ private:
     QLineEdit* m_dbPath     = nullptr;
 
     // CAT tab
-    QCheckBox* m_catEnabled = nullptr;
-    QComboBox* m_catBackend = nullptr;
-    QLineEdit* m_catHost    = nullptr;
-    QSpinBox*  m_catPort    = nullptr;
+    QCheckBox* m_catEnabled        = nullptr;
+    QComboBox* m_catBackend        = nullptr;
+    QLineEdit* m_catHost           = nullptr;
+    QSpinBox*  m_catPort           = nullptr;
+    // rigctld auto-start
+    QCheckBox* m_rigctldAutoStart  = nullptr;
+    QLineEdit* m_rigctldPath       = nullptr;
+    QComboBox* m_rigctldComPort    = nullptr;
+    QComboBox* m_rigctldBaud       = nullptr;
+    QSpinBox*  m_rigctldModel      = nullptr;
 
     // LoTW tab
     QLineEdit* m_lotwCall   = nullptr;
@@ -79,4 +87,10 @@ private:
 
     // Decodium tab
     QLineEdit* m_decodiumPath = nullptr;
+
+    // Sync automatica tab
+    QCheckBox* m_syncEnabled  = nullptr;
+    QSpinBox*  m_syncInterval = nullptr;
+    QCheckBox* m_syncLotw     = nullptr;
+    QCheckBox* m_syncEqsl     = nullptr;
 };

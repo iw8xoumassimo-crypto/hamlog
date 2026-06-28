@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS
-    Core Widgets Sql Network)
+    Core Widgets Sql Network PrintSupport)
 
 if(WIN32)
     find_package(Qt6 QUIET COMPONENTS AxContainer)
@@ -44,6 +44,9 @@ set(SOURCES
     src/ui/log_manager_dialog.cpp
     src/ui/dx_hunter_dialog.cpp
     src/ui/qsl_dialog.cpp
+    src/ui/export_adif_dialog.cpp
+    src/ui/qsl_label_dialog.cpp
+    src/ui/contest_dialog.cpp
     src/ui/duplicates_dialog.cpp
 )
 
@@ -56,6 +59,7 @@ target_link_libraries(HamLog PRIVATE
     Qt6::Widgets
     Qt6::Sql
     Qt6::Network
+    Qt6::PrintSupport
 )
 
 if(WIN32 AND TARGET Qt6::AxContainer)

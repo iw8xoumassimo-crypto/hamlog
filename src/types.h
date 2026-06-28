@@ -101,14 +101,18 @@ struct QsoFilter {
     QString continent;
     QString dateFrom;
     QString dateTo;
-    bool    lotwConfirmed = false;
+    bool    lotwConfirmed  = false;
+    bool    lotwNotSent    = false;   // solo QSO non ancora inviati a LoTW
+    bool    eqslNotSent    = false;   // solo QSO non ancora inviati a eQSL
+    bool    clublogNotSent = false;   // solo QSO non ancora inviati a ClubLog
     QString orderBy;     // column name (validated in Database)
     QString orderDir;    // "ASC" or "DESC"
 
     bool hasFilter() const {
         return !callsign.isEmpty() || !band.isEmpty()  || !mode.isEmpty()  ||
                !country.isEmpty()  || !continent.isEmpty() ||
-               !dateFrom.isEmpty() || !dateTo.isEmpty()  || lotwConfirmed;
+               !dateFrom.isEmpty() || !dateTo.isEmpty()  ||
+               lotwConfirmed || lotwNotSent || eqslNotSent || clublogNotSent;
     }
 };
 

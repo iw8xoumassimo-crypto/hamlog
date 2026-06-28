@@ -12,6 +12,7 @@ class QComboBox;
 class QToolButton;
 class QTimer;
 class QDialog;
+class QProcess;
 
 class LogView;
 class QsoEntry;
@@ -90,6 +91,9 @@ private slots:
 
     void updateStatusBar();
     void updateWindowTitle();
+    void applySyncTimer();
+    void onAutoSync();
+    void applyRigctld();
 
 private:
     void buildMenu();
@@ -158,8 +162,10 @@ private:
     AdifWatcher*    m_adifWatcher = nullptr;
     AdifTcpServer*  m_adifTcp     = nullptr;
 
-    QTimer* m_statusTimer = nullptr;
-    QTimer* m_clockTimer  = nullptr;
+    QTimer*   m_statusTimer    = nullptr;
+    QTimer*   m_clockTimer     = nullptr;
+    QTimer*   m_syncTimer      = nullptr;
+    QProcess* m_rigctldProcess = nullptr;
 
     QString m_currentTheme = "Default";
 };
